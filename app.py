@@ -35,19 +35,11 @@ def test_key_vault_full(vault_url, credential):
         steps.append((False, str(e)))
     return steps
 
-def test_azure_sql_full(server, database, username=None, password=None):
+def test_azure_sql_full(connection_string):
     steps = []
     table = "test_connectivity"
     try:
-        if username and password:
-            conn_str = (
-                f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server};DATABASE={database};"
-                f"UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=no;"
-            )
-        else:
-            steps.append((False, "Vui lòng nhập username và password để sử dụng SQL Authentication."))
-            return steps
-        conn = pyodbc.connect(conn_str, timeout=5)
+        conn = pyodbc.connect(connection_string, timeout=5)
         cursor = conn.cursor()
         try:
             cursor.execute(f"CREATE TABLE {table} (id INT PRIMARY KEY, val NVARCHAR(100))")
@@ -75,11 +67,20 @@ def test_azure_sql_full(server, database, username=None, password=None):
         steps.append((False, str(e)))
     return steps
 
-def test_cosmosdb_full(endpoint, key):
+def test_cosmosdb_full(connection_string):
     steps = []
     db_name = f"testdb{uuid.uuid4().hex[:6]}"
     container_name = f"testct{uuid.uuid4().hex[:6]}"
     try:
+        # Parse connection string để lấy endpoint và key
+        conn_parts = dict(part.split('=', 1) for part in connection_string.split(';') if '=' in part)
+        endpoint = conn_parts.get('AccountEndpoint', '').replace('https://', '').replace('http://', '')
+        key = conn_parts.get('AccountKey', '')
+        
+        if not endpoint or not key:
+            steps.append((False, "Connection string không hợp lệ"))
+            return steps
+            
         client = CosmosClient(f"https://{endpoint}/", key)
         db = client.create_database(db_name)
         steps.append((True, f"Tạo database '{db_name}' thành công"))
@@ -103,13 +104,13 @@ def test_cosmosdb_full(endpoint, key):
         steps.append((False, str(e)))
     return steps
 
-def test_blob_full(blob_url, credential):
+def test_blob_full(connection_string):
     steps = []
     container_name = f"testct{uuid.uuid4().hex[:6]}"
     blob_name = "testfile.txt"
     data = b"hello azure blob"
     try:
-        client = BlobServiceClient(account_url=f"https://{blob_url}/", credential=credential)
+        client = BlobServiceClient.from_connection_string(connection_string)
         container = client.create_container(container_name)
         steps.append((True, f"Tạo container '{container_name}' thành công"))
         container_client = client.get_container_client(container_name)
@@ -133,16 +134,46 @@ def test_redis_full(redis_connection_string):
     key = f"testkey:{uuid.uuid4().hex[:6]}"
     value = uuid.uuid4().hex
     try:
-        r = redis.from_url(redis_connection_string)
+        # Hỗ trợ Redis với SSH tunnel
+        if redis_connection_string.startswith('ssh://'):
+            # Parse SSH connection string: ssh://user@host:port
+            ssh_parts = redis_connection_string.replace('ssh://', '').split('@')
+            if len(ssh_parts) == 2:
+                user = ssh_parts[0]
+                host_port = ssh_parts[1].split(':')
+                host = host_port[0]
+                port = int(host_port[1]) if len(host_port) > 1 else 22
+                
+                # Sử dụng SSH tunnel để kết nối Redis
+                import paramiko
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(host, port=port, username=user)
+                
+                # Tạo Redis connection qua SSH tunnel
+                r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+                steps.append((True, f"Kết nối Redis qua SSH thành công: {host}:{port}"))
+            else:
+                steps.append((False, "SSH connection string không hợp lệ"))
+                return steps
+        else:
+            # Kết nối Redis trực tiếp
+            r = redis.from_url(redis_connection_string)
+            steps.append((True, "Kết nối Redis trực tiếp thành công"))
+        
         r.set(key, value)
         steps.append((True, f"Set key '{key}' thành công"))
         val = r.get(key)
-        if val and val.decode() == value:
+        if val and val == value:
             steps.append((True, "Get key thành công"))
         else:
             steps.append((False, "Giá trị key không khớp!"))
         r.delete(key)
         steps.append((True, "Xóa key thành công"))
+        
+        if redis_connection_string.startswith('ssh://'):
+            ssh.close()
+            
     except Exception as e:
         steps.append((False, str(e)))
     return steps
@@ -171,13 +202,9 @@ def list_key_vault_secrets(vault_url, credential):
     except Exception as e:
         return [str(e)]
 
-def list_sql_tables(server, database, username, password):
+def list_sql_tables(connection_string):
     try:
-        conn_str = (
-            f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server};DATABASE={database};"
-            f"UID={username};PWD={password};Encrypt=yes;TrustServerCertificate=no;"
-        )
-        conn = pyodbc.connect(conn_str, timeout=5)
+        conn = pyodbc.connect(connection_string, timeout=5)
         cursor = conn.cursor()
         cursor.execute("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE'")
         tables = [row[0] for row in cursor.fetchall()]
@@ -196,17 +223,17 @@ def list_cosmos_items(endpoint, key, db_name, container_name):
     except Exception as e:
         return [str(e)]
 
-def list_blob_containers(blob_url, credential):
+def list_blob_containers(connection_string):
     try:
-        client = BlobServiceClient(account_url=f"https://{blob_url}/", credential=credential)
+        client = BlobServiceClient.from_connection_string(connection_string)
         containers = [c['name'] for c in client.list_containers()]
         return containers
     except Exception as e:
         return [str(e)]
 
-def list_blobs_in_container(blob_url, credential, container_name):
+def list_blobs_in_container(connection_string, container_name):
     try:
-        client = BlobServiceClient(account_url=f"https://{blob_url}/", credential=credential)
+        client = BlobServiceClient.from_connection_string(connection_string)
         container_client = client.get_container_client(container_name)
         blobs = [b.name for b in container_client.list_blobs()]
         return blobs
@@ -237,17 +264,13 @@ def get_config():
     config = {}
     config_keys = [
         ("keyvault_url", "KEYVAULT_URL"),
-        ("sql_server", "SQL_SERVER"),
-        ("sql_db", "SQL_DB"),
-        ("sql_user", "SQL_USER"),
-        ("sql_pwd", "SQL_PWD"),
-        ("cosmos_endpoint", "COSMOS_ENDPOINT"),
-        ("cosmos_key", "COSMOS_KEY"),
-        ("blob_url", "BLOB_URL"),
+        ("sql_connection_string", "SQL_CONNECTION_STRING"),
+        ("cosmos_connection_string", "COSMOS_CONNECTION_STRING"),
+        ("blob_connection_string", "BLOB_CONNECTION_STRING"),
         ("acr_name", "ACR_NAME"),
         ("acr_subscription", "ACR_SUBSCRIPTION"),
         ("acr_rg", "ACR_RG"),
-        ("redis_conn", "REDIS_CONN"),
+        ("redis_connection_string", "REDIS_CONNECTION_STRING"),
     ]
     for k, envk in config_keys:
         v = os.environ.get(envk)
@@ -509,19 +532,12 @@ def index():
             elif action == 'list':
                 results_keyvault = list_key_vault_secrets(vault_url, credential)
         elif service == 'sql':
-            server = CONFIG['sql_server']
-            db = CONFIG['sql_db']
-            user = CONFIG['sql_user']
-            pwd = CONFIG['sql_pwd']
+            sql_conn_str = CONFIG['sql_connection_string']
             if action == 'add':
                 table = request.form.get('sql_table')
                 value = request.form.get('sql_value')
                 try:
-                    conn_str = (
-                        f"DRIVER={{ODBC Driver 18 for SQL Server}};SERVER={server};DATABASE={db};"
-                        f"UID={user};PWD={pwd};Encrypt=yes;TrustServerCertificate=no;"
-                    )
-                    conn = pyodbc.connect(conn_str, timeout=5)
+                    conn = pyodbc.connect(sql_conn_str, timeout=5)
                     cursor = conn.cursor()
                     # Kiểm tra bảng tồn tại, nếu chưa thì tạo bảng
                     cursor.execute(f"SELECT COUNT(*) FROM sysobjects WHERE name='{table}' AND xtype='U'")
@@ -535,10 +551,11 @@ def index():
                 except Exception as e:
                     results_sql = [str(e)]
             elif action == 'list':
-                results_sql = list_sql_tables(server, db, user, pwd)
+                results_sql = list_sql_tables(sql_conn_str) # Pass sql_conn_str directly
         elif service == 'cosmos':
-            endpoint = CONFIG['cosmos_endpoint']
-            key = CONFIG['cosmos_key']
+            cosmos_conn_str = CONFIG['cosmos_connection_string']
+            endpoint = cosmos_conn_str.split(';')[0].split('=')[1]
+            key = cosmos_conn_str.split(';')[1].split('=')[1]
             db_name = request.form.get('cosmos_db')
             container_name = request.form.get('cosmos_container')
             if action == 'add':
@@ -564,7 +581,8 @@ def index():
             elif action == 'list':
                 results_cosmos = list_cosmos_items(endpoint, key, db_name, container_name)
         elif service == 'blob':
-            blob_url = CONFIG['blob_url']
+            blob_conn_str = CONFIG['blob_connection_string']
+            blob_url = blob_conn_str.split(';')[0].split('=')[1]
             if action == 'add':
                 container_name = request.form.get('blob_container')
                 blob_name = request.form.get('blob_name')
@@ -580,7 +598,7 @@ def index():
                     results_blob = [str(e)]
             elif action == 'list':
                 container_name = request.form.get('blob_container')
-                results_blob = list_blobs_in_container(blob_url, credential, container_name)
+                results_blob = list_blobs_in_container(blob_conn_str, container_name)
         elif service == 'acr':
             acr_name = CONFIG['acr_name']
             acr_subscription = CONFIG['acr_subscription']
@@ -588,18 +606,18 @@ def index():
             if action == 'list':
                 results_acr = list_acr_images(acr_name, acr_subscription, acr_rg, credential)
         elif service == 'redis':
-            redis_conn = CONFIG['redis_conn']
+            redis_conn_str = CONFIG['redis_connection_string']
             if action == 'add':
                 key = request.form.get('redis_key')
                 value = request.form.get('redis_value')
                 try:
-                    r = redis.from_url(redis_conn)
+                    r = redis.from_url(redis_conn_str)
                     r.set(key, value)
                     results_redis = [f"Key '{key}' set."]
                 except Exception as e:
                     results_redis = [str(e)]
             elif action == 'list':
-                results_redis = list_redis_keys(redis_conn)
+                results_redis = list_redis_keys(redis_conn_str)
     return render_template_string(
         TEMPLATE,
         results_keyvault=results_keyvault,

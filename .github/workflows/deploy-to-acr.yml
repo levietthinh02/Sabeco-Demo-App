@@ -38,3 +38,12 @@ jobs:
         tags: |
           ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+        build-args: |
+          KEYVAULT_URL=${{ secrets.KEYVAULT_URL }}
+          SQL_CONNECTION_STRING=${{ secrets.SQL_CONNECTION_STRING }}
+          COSMOS_CONNECTION_STRING=${{ secrets.COSMOS_CONNECTION_STRING }}
+          BLOB_CONNECTION_STRING=${{ secrets.BLOB_CONNECTION_STRING }}
+          ACR_NAME=${{ secrets.ACR_NAME }}
+          ACR_SUBSCRIPTION=${{ secrets.ACR_SUBSCRIPTION }}
+          ACR_RG=${{ secrets.ACR_RG }}
+          REDIS_CONNECTION_STRING=${{ secrets.REDIS_CONNECTION_STRING }}

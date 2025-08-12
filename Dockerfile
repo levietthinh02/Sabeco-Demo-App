@@ -13,7 +13,8 @@ RUN apt-get update && \
         gnupg \
         gcc \
         g++ \
-        python3-dev && \
+        python3-dev \
+        openssh-client && \
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor \
         -o /usr/share/keyrings/microsoft-prod.gpg && \
@@ -29,6 +30,26 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy toàn bộ mã nguồn
 COPY . .
+
+# Nhận build args từ GitHub Actions
+ARG KEYVAULT_URL
+ARG SQL_CONNECTION_STRING
+ARG COSMOS_CONNECTION_STRING
+ARG BLOB_CONNECTION_STRING
+ARG ACR_NAME
+ARG ACR_SUBSCRIPTION
+ARG ACR_RG
+ARG REDIS_CONNECTION_STRING
+
+# Set environment variables
+ENV KEYVAULT_URL=$KEYVAULT_URL
+ENV SQL_CONNECTION_STRING=$SQL_CONNECTION_STRING
+ENV COSMOS_CONNECTION_STRING=$COSMOS_CONNECTION_STRING
+ENV BLOB_CONNECTION_STRING=$BLOB_CONNECTION_STRING
+ENV ACR_NAME=$ACR_NAME
+ENV ACR_SUBSCRIPTION=$ACR_SUBSCRIPTION
+ENV ACR_RG=$ACR_RG
+ENV REDIS_CONNECTION_STRING=$REDIS_CONNECTION_STRING
 
 # Thiết lập biến môi trường cho Flask
 ENV FLASK_APP=app.py

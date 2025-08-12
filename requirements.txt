@@ -7,3 +7,4 @@ azure-mgmt-containerregistry>=14.0.0
 redis
 streamlit
 flask
+paramiko
