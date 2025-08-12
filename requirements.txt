@@ -1,0 +1,9 @@
+azure-identity
+azure-keyvault-secrets
+azure-storage-blob
+pyodbc
+azure-cosmos
+azure-mgmt-containerregistry>=14.0.0
+redis
+streamlit
+flask
